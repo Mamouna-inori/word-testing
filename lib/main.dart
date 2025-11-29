@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -116,10 +117,11 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return CupertinoApp(
+    return MaterialApp(
       title: '単語・一問一答クイズ',
-      theme:
-          const CupertinoThemeData(primaryColor: CupertinoColors.systemIndigo),
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(primarySwatch: Colors.indigo),
+      // MaterialLocalizations are provided by MaterialApp.
       home: const HomePage(),
     );
   }
@@ -825,6 +827,7 @@ class StartScreen extends StatefulWidget {
 
 class _StartScreenState extends State<StartScreen> {
   late Map<String, String> status;
+  int selectedCount = 10;
 
   @override
   void initState() {
@@ -835,7 +838,8 @@ class _StartScreenState extends State<StartScreen> {
   void _startQuiz({required bool all}) {
     final pool = List<Map<String, dynamic>>.from(widget.items);
     pool.shuffle();
-    final quizItems = all ? pool : pool.take(10).toList();
+    final quizItems =
+        all ? pool : pool.take(selectedCount.clamp(1, pool.length)).toList();
     Navigator.of(context).push(MaterialPageRoute(
         builder: (c) => QuizScreen(
               mode: widget.mode,
@@ -878,9 +882,24 @@ class _StartScreenState extends State<StartScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ensure items are safe Maps to avoid runtime JS-to-Dart conversion issues on web.
+    final items = widget.items.map<Map<String, dynamic>>((dynamic raw) {
+      if (raw is Map<String, dynamic>) return Map<String, dynamic>.from(raw);
+      try {
+        return Map<String, dynamic>.from(raw as Map);
+      } catch (_) {
+        return {
+          'id': raw.hashCode.toString(),
+          'question': raw.toString(),
+          'answer': ''
+        };
+      }
+    }).toList();
+
     int unattempted = 0, unlearned = 0, checking = 0, mastered = 0;
-    for (final it in widget.items) {
-      final s = status[it['id'].toString()] ?? '未実施';
+    for (final it in items) {
+      final id = (it['id'] ?? '').toString();
+      final s = status[id] ?? '未実施';
       switch (s) {
         case '未習得':
           unlearned++;
@@ -896,61 +915,87 @@ class _StartScreenState extends State<StartScreen> {
       }
     }
 
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.mode)),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('${widget.items.length} 問',
-                style:
-                    const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            Card(
-              color: Colors.indigo.shade50,
-              child: Padding(
-                padding: const EdgeInsets.all(12.0),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text('習得率', style: TextStyle(fontSize: 14)),
-                          const SizedBox(height: 6),
-                          Text('$mastered / ${widget.items.length} (習得)',
-                              style: const TextStyle(
-                                  fontSize: 16, fontWeight: FontWeight.bold)),
-                        ],
-                      ),
+    final isMobilePlatform = !kIsWeb &&
+        (defaultTargetPlatform == TargetPlatform.android ||
+            defaultTargetPlatform == TargetPlatform.iOS);
+    final isSmallScreen = MediaQuery.of(context).size.width < 600;
+    final isMobile = isMobilePlatform || isSmallScreen;
+
+    Widget mainBody = Padding(
+      padding: const EdgeInsets.all(16.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('${items.length} 問',
+              style:
+                  const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          Card(
+            color: Colors.indigo.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(12.0),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('習得率', style: TextStyle(fontSize: 14)),
+                        const SizedBox(height: 6),
+                        Text('$mastered / ${widget.items.length} (習得)',
+                            style: const TextStyle(
+                                fontSize: 16, fontWeight: FontWeight.bold)),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    SizedBox(
-                      width: 160,
-                      child: LinearProgressIndicator(
-                        value: widget.items.isEmpty
-                            ? 0
-                            : mastered / widget.items.length.toDouble(),
-                        minHeight: 12,
-                        backgroundColor: Colors.white,
-                        color: Colors.indigo,
-                      ),
+                  ),
+                  const SizedBox(width: 12),
+                  // 円グラフ風の習得表示: 円と中央に習得数を表示
+                  SizedBox(
+                    width: 120,
+                    height: 120,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        SizedBox(
+                          width: 96,
+                          height: 96,
+                          child: CircularProgressIndicator(
+                            value: items.isEmpty
+                                ? 0
+                                : mastered / items.length.toDouble(),
+                            strokeWidth: 10,
+                            color: Colors.indigo,
+                            backgroundColor: Colors.white,
+                          ),
+                        ),
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text('$mastered',
+                                style: const TextStyle(
+                                    fontSize: 20, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 4),
+                            const Text('習得', style: TextStyle(fontSize: 12)),
+                          ],
+                        ),
+                      ],
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ),
-            Row(children: [
-              Text('未実施:$unattempted'),
-              const SizedBox(width: 8),
-              Text('未習得:$unlearned'),
-              const SizedBox(width: 8),
-              Text('点検中:$checking'),
-              const SizedBox(width: 8),
-              Text('習得:$mastered')
-            ]),
-            const SizedBox(height: 16),
+          ),
+          Row(children: [
+            Text('未実施:$unattempted'),
+            const SizedBox(width: 8),
+            Text('未習得:$unlearned'),
+            const SizedBox(width: 8),
+            Text('点検中:$checking'),
+            const SizedBox(width: 8),
+            Text('習得:$mastered')
+          ]),
+          const SizedBox(height: 16),
+          if (!isMobile)
             Row(children: [
               Expanded(
                   child: ElevatedButton(
@@ -962,32 +1007,71 @@ class _StartScreenState extends State<StartScreen> {
                       onPressed: () => _startQuiz(all: true),
                       child: const Text('全範囲')))
             ]),
-            const SizedBox(height: 12),
-            OutlinedButton(
-                onPressed: _resetHistory, child: const Text('学習履歴をリセット')),
-            const SizedBox(height: 12),
-            Expanded(
-                child: ListView.builder(
-                    itemCount: widget.items.length,
-                    itemBuilder: (c, i) {
-                      final it = widget.items[i];
-                      final id = it['id'].toString();
-                      final q = it['question'] ?? it['question'] ?? '';
-                      final a = it['answers'] != null
-                          ? (it['answers'] is List
-                              ? (it['answers'] as List).join(' / ')
-                              : it['answers'].toString())
-                          : (it['answer'] ?? '');
-                      final s = status[id] ?? '未実施';
-                      return ListTile(
-                        title: Text(q.toString()),
-                        subtitle: Text('$a'),
-                        trailing: Text(s),
-                      );
-                    })),
-          ],
-        ),
+          const SizedBox(height: 12),
+          OutlinedButton(
+              onPressed: _resetHistory, child: const Text('学習履歴をリセット')),
+          const SizedBox(height: 12),
+          Expanded(
+              child: ListView.builder(
+                  itemCount: items.length,
+                  itemBuilder: (c, i) {
+                    final it = items[i];
+                    final id = it['id'].toString();
+                    final q = (it['question'] ?? it['answer'] ?? '').toString();
+                    final a = it['answers'] != null
+                        ? (it['answers'] is List
+                            ? (it['answers'] as List).join(' / ')
+                            : it['answers'].toString())
+                        : (it['answer'] ?? '');
+                    final s = status[id] ?? '未実施';
+                    return ListTile(
+                      title: Text(q.toString()),
+                      subtitle: Text('$a'),
+                      trailing: Text(s),
+                    );
+                  })),
+        ],
       ),
+    );
+
+    return Scaffold(
+      appBar: AppBar(title: Text(widget.mode)),
+      body: mainBody,
+      bottomNavigationBar: isMobile
+          ? SafeArea(
+              minimum: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  OutlinedButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('戻る')),
+                  const SizedBox(width: 8),
+                  // 出題数選択
+                  DropdownButton<int>(
+                      value: selectedCount,
+                      items: <int>[5, 10, 20, 50]
+                          .map((e) =>
+                              DropdownMenuItem(value: e, child: Text('$e')))
+                          .toList(),
+                      onChanged: (v) {
+                        if (v == null) return;
+                        setState(() {
+                          selectedCount = v;
+                        });
+                      }),
+                  const SizedBox(width: 8),
+                  Expanded(
+                      child: ElevatedButton(
+                          onPressed: () => _startQuiz(all: false),
+                          child: Text('ランダム $selectedCount 問'))),
+                  const SizedBox(width: 8),
+                  ElevatedButton(
+                      onPressed: () => _startQuiz(all: true),
+                      child: const Text('全範囲')),
+                ],
+              ),
+            )
+          : null,
     );
   }
 }
@@ -1129,54 +1213,87 @@ class _QuizScreenState extends State<QuizScreen> {
         },
         child: Focus(
           autofocus: true,
-          child: Scaffold(
-            appBar: AppBar(
-                title:
-                    Text('${widget.mode} (${index + 1}/${quizItems.length})')),
-            body: Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  LinearProgressIndicator(
-                      value: (index + 1) / quizItems.length.toDouble()),
-                  const SizedBox(height: 8),
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16.0),
-                      child: Text(q.toString(),
-                          style: const TextStyle(fontSize: 20)),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: ctrl,
-                    decoration: const InputDecoration(labelText: '解答を入力'),
-                    onSubmitted: (_) => _checkOrNext(),
-                    textInputAction: TextInputAction.done,
-                  ),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8.0),
-                    child: SizedBox(
-                      width: double.infinity,
-                      height: 56,
-                      child: ElevatedButton(
-                        onPressed: _checkOrNext,
-                        child: Text(
-                          !checkedCurrent
-                              ? '解答を確認'
-                              : (index < quizItems.length - 1 ? '次へ' : '結果を見る'),
-                          style: const TextStyle(fontSize: 18),
-                        ),
+          child: Builder(builder: (context) {
+            final isMobilePlatform = !kIsWeb &&
+                (defaultTargetPlatform == TargetPlatform.android ||
+                    defaultTargetPlatform == TargetPlatform.iOS);
+            final isSmallScreen = MediaQuery.of(context).size.width < 600;
+            final isMobile = isMobilePlatform || isSmallScreen;
+
+            return Scaffold(
+              appBar: AppBar(
+                  title: Text(
+                      '${widget.mode} (${index + 1}/${quizItems.length})')),
+              body: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  children: [
+                    LinearProgressIndicator(
+                        value: (index + 1) / quizItems.length.toDouble()),
+                    const SizedBox(height: 8),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(16.0),
+                        child: Text(q.toString(),
+                            style: const TextStyle(fontSize: 20)),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(feedback, style: const TextStyle(fontSize: 16)),
-                ],
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: ctrl,
+                      decoration: const InputDecoration(labelText: '解答を入力'),
+                      onSubmitted: (_) => _checkOrNext(),
+                      textInputAction: TextInputAction.done,
+                    ),
+                    const SizedBox(height: 12),
+                    if (!isMobile)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8.0),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 56,
+                          child: ElevatedButton(
+                            onPressed: _checkOrNext,
+                            child: Text(
+                                !checkedCurrent
+                                    ? '解答を確認'
+                                    : (index < quizItems.length - 1
+                                        ? '次へ'
+                                        : '結果を見る'),
+                                style: const TextStyle(fontSize: 18)),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 12),
+                    Text(feedback, style: const TextStyle(fontSize: 16)),
+                    const SizedBox(height: 56),
+                  ],
+                ),
               ),
-            ),
-          ),
+              bottomNavigationBar: isMobile
+                  ? SafeArea(
+                      minimum: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 8),
+                      child: SizedBox(
+                        height: 56,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(8))),
+                          onPressed: _checkOrNext,
+                          child: Text(
+                              !checkedCurrent
+                                  ? '解答を確認'
+                                  : (index < quizItems.length - 1
+                                      ? '次へ'
+                                      : '結果を見る'),
+                              style: const TextStyle(fontSize: 18)),
+                        ),
+                      ),
+                    )
+                  : null,
+            );
+          }),
         ),
       ),
     );

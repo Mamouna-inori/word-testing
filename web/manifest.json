@@ -19,5 +19,11 @@
             "sizes": "512x512",
             "type": "image/png"
         }
+        ,
+        {
+            "src": "assets/icon.jpg",
+            "sizes": "512x512",
+            "type": "image/jpeg"
+        }
     ]
 }
